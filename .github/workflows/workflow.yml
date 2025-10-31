@@ -27,7 +27,7 @@ jobs:
       - name: Build XPI
         run: |
           cd $GITHUB_WORKSPACE
-          zip -r dist/timeSync42.xpi * -x "*.git*"
+          zip -r dist/timeSync42.xpi manifest.json main.js assets/
 
       # 5️⃣ Upload artifact
       - name: Upload XPI artifact
