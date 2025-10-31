@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "TimeSync42",
+  "version": "1.0.0",
+  "description": "Synchronize your 42 profile time with your worktime and bus schedule.",
+  "author": "Guilheim C",
+  "content_scripts": [
+    {
+      "matches": ["https://profile.intra.42.fr/*"],
+      "js": ["main.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/5_bus.svg",
+        "assets/86_bus.svg",
+        "assets/transit.png"
+      ],
+      "matches": ["https://profile.intra.42.fr/*"]
+    }
+  ],
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://api.bitume2000.fr/"
+  ]
+}
