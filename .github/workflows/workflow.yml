@@ -1,0 +1,38 @@
+name: Build XPI
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-xpi:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # 2️⃣ Setup Node (si tu veux ajouter des outils)
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      # 3️⃣ Create dist folder
+      - name: Create dist folder
+        run: mkdir -p dist
+
+      # 4️⃣ Zip extension into XPI
+      - name: Build XPI
+        run: |
+          cd $GITHUB_WORKSPACE
+          zip -r dist/timeSync42.xpi * -x "*.git*"
+
+      # 5️⃣ Upload artifact
+      - name: Upload XPI artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: timeSync42-xpi
+          path: dist/timeSync42.xpi
