@@ -66,13 +66,36 @@ async function displayLogtime(depth = 0) {
     const restrictEnabled = localStorage.getItem("restrict_time") === "true";
     const { remainingMinutes, targetTimeText } = calculateTargetLogtime(currentMinutes, restrictEnabled);
 
+    // Calcul couleur dynamique
+    let progressColor;
+    if (currentMinutes >= 7 * 60) progressColor = "#4CAF50"; // vert
+    else if (currentMinutes >= 6 * 60 + 18) progressColor = "#FF9800"; // orange
+    else progressColor = "#F44336"; // rouge
+
+    const percent = Math.min((currentMinutes / (7 * 60)) * 100, 100);
+
     const logDiv = document.createElement("div");
     logDiv.classList.add("user-header-box", "location");
-    logDiv.style.color = getLogtimeColor(currentMinutes);
 
     logDiv.innerHTML = `
-        <div>Current Logtime</div>
-        <div>${logtimeValue || "N/A"}</div>
+        <div style="color: ${progressColor}" >Current Logtime</div>
+        <div style="color: ${progressColor}">${logtimeValue || "N/A"}</div>
+        <div class="progress-bar" style="
+            background:#eee;
+            height:10px;
+            width:100%;
+            max-width:220px;
+            border-radius:4px;
+            overflow:hidden;
+            margin:6px 0;
+        ">
+            <div class="progress" style="
+                height:100%;
+                width:${percent}%;
+                background:${progressColor};
+                transition: width 0.6s ease, background 0.6s ease;
+            "></div>
+        </div>
         <div class="target-time" style="font-size:12px; color:grey;">
             ${remainingMinutes <= 0 ? "7h reached!" : "7h reached at " + targetTimeText}
         </div>
@@ -169,15 +192,15 @@ async function displayBus() {
                     <span style="font-weight:bold;">→ ${dep.direction}</span>
                 <div class="departure-right" style="display:flex; align-items:center; gap:6px; font-weight:bold;">
                     <span class="departure-time"></span>
-                    ${dep.temps_reel ? '<div class="wifi-icon" style="color:green; animation:pulse 1.5s infinite;"><div style="color:green; animation:pulse 1.5s infinite;">\n' +
-                '                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" \n' +
-                '                                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">\n' +
-                '                                    <path d="M5 12.55a11 11 0 0 1 14.08 0"/>\n' +
-                '                                    <path d="M8.5 16.05a6 6 0 0 1 7 0"/>\n' +
-                '                                    <line x1="12" y1="20" x2="12" y2="20"/>\n' +
-                '                                </svg>\n' +
-                '                            </div>\n' +
-                '                    </div></div>' : ''}
+                    ${dep.temps_reel ? `
+                        <div class="wifi-icon" style="color:green; animation:pulse 1.5s infinite;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" 
+                                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                                <path d="M8.5 16.05a6 6 0 0 1 7 0"/>
+                                <line x1="12" y1="20" x2="12" y2="20"/>
+                            </svg>
+                        </div>` : ""}
                 </div>
                 </div>
             `;
@@ -189,7 +212,6 @@ async function displayBus() {
         content.innerHTML = "";
         content.appendChild(fragment);
 
-        // Animation style
         const style = document.createElement("style");
         style.textContent = `
             @keyframes pulse {0%{opacity:0.3;transform:scale(0.9);}50%{opacity:1;transform:scale(1.1);}100%{opacity:0.3;transform:scale(0.9);}}
@@ -197,7 +219,6 @@ async function displayBus() {
         `;
         document.head.appendChild(style);
 
-        // Update dynamique
         setInterval(() => {
             const now = new Date();
             content.querySelectorAll(".departure-item").forEach(li => {
