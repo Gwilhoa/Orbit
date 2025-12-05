@@ -3,7 +3,12 @@
   "name": "TimeSync42",
   "version": "1.0.0",
   "description": "Synchronize your 42 profile time with your worktime and bus schedule.",
-  "author": "Guilheim C",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "@timesync42",
+      "strict_min_version": "109.0"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["https://profile.intra.42.fr/*"],
