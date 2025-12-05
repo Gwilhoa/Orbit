@@ -1,1 +1,8 @@
-/.idea/
+node_modules/
+*.zip
+*.log
+.DS_Store
+.vscode/
+.idea/
+dist/
+build/
