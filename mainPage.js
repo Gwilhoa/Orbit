@@ -32,18 +32,12 @@ function calculateTargetLogtime(currentMinutes, restrictEnabled = false) {
     targetTime.setMinutes(now.getMinutes() + remaining);
 
     const orangeTime = new Date(targetTime.getTime());
-    orangeTime.setMinutes(targetTime.getMinutes() - 42);
+    orangeTime.setMinutes(targetTime.getMinutes() - 21);
 
     return {
         remainingMinutes: remaining,
-        targetTimeText: `${formatTime(targetTime)} (6h18 at ${formatTime(orangeTime)})`
+        targetTimeText: `${formatTime(targetTime)} (6h39 at ${formatTime(orangeTime)})`
     };
-}
-
-function getLogtimeColor(currentMinutes) {
-    if (currentMinutes >= 7 * 60) return "green";
-    if (currentMinutes >= 6 * 60 + 18) return "orange";
-    return "red";
 }
 
 // ======================== DISPLAY LOGTIME ========================
@@ -66,11 +60,16 @@ async function displayLogtime(depth = 0) {
     const restrictEnabled = localStorage.getItem("restrict_time") === "true";
     const { remainingMinutes, targetTimeText } = calculateTargetLogtime(currentMinutes, restrictEnabled);
 
-    // Calcul couleur dynamique
     let progressColor;
-    if (currentMinutes >= 7 * 60) progressColor = "#4CAF50"; // vert
-    else if (currentMinutes >= 6 * 60 + 18) progressColor = "#FF9800"; // orange
-    else progressColor = "#F44336"; // rouge
+    if (currentMinutes >= 7 * 60) {
+        progressColor = "#4CAF50"; // vert
+    } else if (currentMinutes >= 6 * 60 + 39) {
+        progressColor = "#fdd201"; // jaune
+    } else if (currentMinutes >= 6 * 60 + 18) {
+        progressColor = "#FF9800"; // orange
+    } else {
+        progressColor = "#F44336"; // rouge
+    }
 
     const percent = Math.min((currentMinutes / (7 * 60)) * 100, 100);
 
@@ -264,6 +263,21 @@ function updateTimeDisplay(span, diffMin, annule, animate = false) {
     }
 }
 
+
+// ======================== CLUSTER LINK ========================
+function addCustomLink() {
+    const buttonContainer = document.querySelector(".pull-right.button-actions.margin-right-42");
+    if (!buttonContainer) return;
+
+    const customLink = document.createElement("a");
+    customLink.href = "https://meta.intra.42.fr/clusters";
+    customLink.className = "iconf-map-location"; // Ajustez les classes selon votre design
+    customLink.style.marginLeft = "10px";
+
+    buttonContainer.appendChild(customLink);
+}
+
 // ======================== EXEC ========================
 displayLogtime();
 displayBus();
+addCustomLink();
