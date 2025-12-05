@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "TimeSync42",
+  "name": "42Companion",
   "version": "1.0.0",
   "description": "Synchronize your 42 profile time with your worktime and bus schedule.",
   "browser_specific_settings": {
     "gecko": {
-      "id": "@timesync42",
+      "id": "@42companion",
       "strict_min_version": "109.0"
     }
   },
