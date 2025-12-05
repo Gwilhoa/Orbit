@@ -1,0 +1,26 @@
+{
+  "name": "timesync42",
+  "version": "1.0.0",
+  "description": "Synchronize your 42 profile time with your worktime and bus schedule.",
+  "main": "main.js",
+  "scripts": {
+    "build": "echo 'No build process needed for manifest v3'",
+    "dev": "echo 'Load extension in Chrome developer mode'",
+    "lint": "echo 'main.js:270 - No linter configured'",
+    "test": "echo 'No tests configured'",
+    "zip": "zip -r timesync42.zip . -x '*.git*' 'node_modules/*' '*.zip'",
+    "xpi": "jar cf timesync42.xpi manifest.json main.js assets/",
+    "sign": "web-ext sign --api-key=$AMO_API_KEY --api-secret=$AMO_API_SECRET"
+  },
+  "keywords": [
+    "chrome-extension",
+    "42",
+    "logtime",
+    "bus-schedule"
+  ],
+  "author": "Guilheim C",
+  "license": "MIT",
+  "devDependencies": {
+    "web-ext": "^9.2.0"
+  }
+}
