@@ -1,7 +1,7 @@
 {
-  "name": "42companion",
-  "version": "1.0.0",
-  "description": "Essential companion tools for 42 students including logtime tracking and bus schedules.",
+  "name": "orbit",
+  "version": "1.0.1",
+  "description": "Track your logtime, know exactly when to leave, and instantly spot a free seat with our redesigned interactive cluster map.",
   "main": "main.js",
   "scripts": {
     "build": "echo 'No build process needed for manifest v3'",
