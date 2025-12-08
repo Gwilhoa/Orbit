@@ -33,5 +33,5 @@ jobs:
       - name: Upload XPI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: timeSync42-xpi
-          path: dist/timeSync42.xpi
+          name: Orbit-xpi
+          path: dist/Orbit.xpi

@@ -1,7 +1,3 @@
-// cluster.js - Extension Chrome complète pour améliorer l'UI des clusters 42
-// Version 1.3 - Gestion des places Laptop (Gris clair) + Places sans numéro (Gris foncé)
-// Installation : chrome://extensions/ → Mode développeur → Charger l'extension
-
 // ============================================
 // 1. LOGIQUE PRINCIPALE
 // ============================================
@@ -234,10 +230,6 @@
         document.head.appendChild(styleElement);
     }
 
-    function isLaptopSpot(id) {
-        if (!id) return false;
-        return /^z[1-4]r1p/.test(id);
-    }
 
     function getGradient(rate) {
         if (rate > 90) return 'linear-gradient(135deg, #e53e3e 0%, #c53030 100%)';
@@ -250,12 +242,10 @@
     // ============================================
 
     function updateUI() {
-        // Nettoyer l'interface
         const oldBar = document.querySelector('.cluster-info-bar');
         if (oldBar) oldBar.remove();
         document.querySelectorAll('.post-label').forEach(el => el.remove());
 
-        // --- 1. PARCOURS DES RECTANGLES ---
         const allRects = document.querySelectorAll('.posts rect');
         let iMacCount = 0;
         let usedImacCount = 0;
@@ -263,21 +253,12 @@
         allRects.forEach(rect => {
             const id = rect.getAttribute('id');
 
-            // CAS 1: Place Morte / Sans numéro (----)
             if (!id || id === '----') {
                 rect.classList.add('dead-spot');
                 rect.classList.remove('used');
-                // On arrête ici pour cette place (pas de label, pas de stats)
                 return;
             }
 
-            // CAS 2: Place Laptop (Gris Clair)
-            if (isLaptopSpot(id)) {
-                rect.classList.add('laptop-spot');
-                rect.classList.remove('used');
-                rect.classList.remove('dead-spot');
-            }
-            // CAS 3: Vrai iMac (Bleu/Vert)
             else {
                 rect.classList.remove('laptop-spot');
                 rect.classList.remove('dead-spot');
@@ -288,21 +269,21 @@
                 }
             }
 
-            // --- 2. AJOUT DES LABELS (Seulement si ID valide) ---
+            // --- 2. AJOUT DES LABELS (Seulement si ID valide ET poste libre) ---
             const x = parseFloat(rect.getAttribute('x'));
             const y = parseFloat(rect.getAttribute('y'));
             const width = parseFloat(rect.getAttribute('width'));
             const height = parseFloat(rect.getAttribute('height'));
 
-            // On n'ajoute pas de texte si c'est une place morte, sauf si l'ID existe mais est cassé
             const postNumberMatch = id.match(/p(\d+)$/);
 
-            if (postNumberMatch) {
+            // MODIFICATION ICI : On vérifie que la place n'a PAS la classe 'used'
+            if (postNumberMatch && !rect.classList.contains('used')) {
                 const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 label.setAttribute('x', x + width / 2);
                 label.setAttribute('y', y + height / 2);
 
-                const labelClass = isLaptopSpot(id) ? 'post-label laptop-text' : 'post-label';
+                const labelClass = 'post-label';
                 label.setAttribute('class', labelClass);
                 label.textContent = postNumberMatch[1];
 
@@ -310,7 +291,6 @@
             }
         });
 
-        // --- 3. BARRE D'INFO ---
         const availableSeats = iMacCount - usedImacCount;
         const occupancyRate = iMacCount > 0
             ? ((usedImacCount / iMacCount) * 100).toFixed(0)
@@ -322,7 +302,7 @@
       <div class="cluster-info-section">
         <div class="info-item">
           <span class="info-icon available"></span>
-          <span class="info-label">iMac Dispo</span>
+          <span class="info-label">Postes disponible</span>
         </div>
         <div class="info-item">
           <span class="info-icon occupied"></span>
@@ -356,7 +336,6 @@
         addTooltips();
     }
 
-    // --- 4. TOOLTIPS ---
     function addTooltips() {
         let tooltip = document.querySelector('.cluster-tooltip');
         if (!tooltip) {
@@ -378,7 +357,7 @@
         });
 
         document.querySelectorAll('.posts rect').forEach(rect => {
-            // Pas de tooltip pour les places déjà occupées par quelqu'un (le rect est sous l'image)
+            // Si c'est utilisé, on laisse le tooltip par défaut (login), sauf si c'est une place morte
             if (rect.classList.contains('used') && !rect.classList.contains('dead-spot')) return;
 
             rect.onmouseenter = function() {
@@ -387,10 +366,8 @@
 
                 if (!id || id === '----') {
                     text = '🚫 Place indisponible';
-                } else if (isLaptopSpot(id)) {
-                    text = `💻 Zone Laptop ${id}`;
                 } else {
-                    text = `📍 Poste iMac ${id}`;
+                    text = `📍 Poste ${id}`;
                 }
 
                 if (text) {
@@ -412,7 +389,7 @@
     function init() {
         if (!document.querySelector('.map-container')) return;
 
-        console.log('🚀 42 Cluster UI v1.3 Active');
+        console.log('🚀 42 Cluster UI v1.4 Active');
         injectStyles();
 
         setTimeout(updateUI, 500);
