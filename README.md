@@ -1,4 +1,4 @@
-# 42Companion
+# Orbit
 
 Browser extension providing essential tools for 42 students including logtime tracking and bus schedules.
 
@@ -22,14 +22,14 @@ Browser extension providing essential tools for 42 students including logtime tr
 1. Open Firefox and go to `about:debugging`
 2. Click "This Firefox" in the sidebar
 3. Click "Load Temporary Add-on"
-4. Select the `42companion.xpi` file
+4. Select the `Orbit.xpi` file
 5. The extension will work until you restart Firefox
 
 **Option 2: Permanent Installation**
 1. Download the .xpi file (`npm run xpi`)
 2. Open Firefox and go to `about:addons`
 3. Click the gear icon and select "Install Add-on From File"
-4. Select the `42companion.xpi` file
+4. Select the `Orbit.xpi` file
 5. **Note**: For permanent installation, you may need to disable signature verification:
    - Go to `about:config`
    - Set `xpinstall.signatures.required` to `false`
