@@ -18,6 +18,7 @@
     {
       "matches": ["*://meta.intra.42.fr/clusters*"],
       "js": ["clusterPage.js"],
+      "css": ["clusterPage.css"],
       "run_at": "document_idle"
     }
   ],
