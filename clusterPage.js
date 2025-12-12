@@ -2,7 +2,7 @@
     'use strict';
 
     let debounceTimer;
-    const EXAM_SEAT_COUNT = 30;
+    const EXAM_SEAT_COUNT = 0;
 
     function getGradient(rate) {
         if (rate > 90) return 'linear-gradient(135deg, #e53e3e 0%, #c53030 100%)';
@@ -10,25 +10,23 @@
         return 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
     }
 
-        function detectExamMode() {
-            const now = new Date();
+    function detectExamMode() {
+        const now = new Date();
+        const day = now.getDay();
+        const hour = now.getHours();
 
-            const day = now.getDay();
-            const hour = now.getHours();
-
-            // MARDI : 9h → 13h
-            if (day === 2 && hour >= 9 && hour < 13) {
-                return true;
-            }
-
-            // JEUDI : 13h → 17h
-            if (day === 4 && hour >= 13 && hour < 17) {
-                return true;
-            }
-
-            return false;
+        // MARDI : 9h → 13h
+        if (day === 2 && hour >= 9 && hour < 13) {
+            return true;
         }
 
+        // JEUDI : 13h → 17h
+        if (day === 4 && hour >= 13 && hour < 17) {
+            return true;
+        }
+
+        return false;
+    }
 
     function markZ2PostsAsPossiblyAvailable() {
         const z2Groups = document.querySelectorAll('g[class^="z2r"]');
@@ -78,6 +76,8 @@
                 }
             });
         });
+
+        return clusterStats;
     }
 
     function createLiveComponents() {
@@ -194,7 +194,8 @@
     function updateUI() {
         const isExamMode = detectExamMode();
 
-        updateTabsFromSidebar(isExamMode);
+        const clusterStats = updateTabsFromSidebar(isExamMode);
+        console.log(clusterStats)
 
         const oldBar = document.querySelector('.cluster-info-bar');
         if (oldBar) oldBar.remove();
@@ -234,11 +235,12 @@
         });
 
         // ======= CALCUL DES POSTES DISPONIBLES =======
-        let availableSeats = iMacCount - usedImacCount;
+        const currentTab = document.querySelector('.nav-pills li.active a');
+        let availableSeats = 0;
 
-        if (isExamMode) {
-            availableSeats = Math.max(0, availableSeats - EXAM_SEAT_COUNT);
-        }
+            Object.keys(clusterStats).forEach(key => {
+                availableSeats = availableSeats + clusterStats[key];
+            });
 
         if (isExamMode) {
             document.body.classList.add('exam-mode');
@@ -247,8 +249,10 @@
             document.body.classList.remove('exam-mode');
         }
 
-        const occupancyRate = iMacCount > 0 ? ((usedImacCount / iMacCount) * 100).toFixed(0) : 0;
-
+        const occupied = iMacCount - availableSeats;
+        const occupancyRate = iMacCount > 0
+            ? ((occupied / iMacCount) * 100).toFixed(0)
+            : 0;
         // ======= INFO BAR + BANDEAU EXAM =======
         const infoBar = document.createElement('div');
         infoBar.className = 'cluster-info-bar';
@@ -337,7 +341,7 @@ ${isExamMode ? `
     }
 
     // ============================================
-    // G. INITIALISATION
+    // INITIALISATION
     // ============================================
     function init() {
         if (!document.querySelector('.map-container')) return;
