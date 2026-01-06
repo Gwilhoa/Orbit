@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Orbit",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "description": "Track your logtime, know exactly when to leave, and instantly spot a free seat with our redesigned interactive cluster map.",
   "browser_specific_settings": {
     "gecko": {
