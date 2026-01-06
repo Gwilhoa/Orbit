@@ -1,37 +1,57 @@
-name: Build XPI
+name: Sign and Release Orbit
 
 on:
   push:
-  workflow_dispatch:
+    tags:
+      - 'v*' # Se déclenche sur v1.0.0, v2.1.0, etc.
 
 jobs:
-  build-xpi:
+  build-and-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Important pour pouvoir créer la release et uploader les assets
 
     steps:
-      # 1️⃣ Checkout code
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup Node (si tu veux ajouter des outils)
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
-      # 3️⃣ Create dist folder
-      - name: Create dist folder
-        run: mkdir -p dist
+      - name: Install dependencies
+        run: npm ci # Utilise 'ci' pour une installation propre en pipeline
 
-      # 4️⃣ Zip extension into XPI
-      - name: Build XPI
-        run: |
-          cd $GITHUB_WORKSPACE
-          zip -r dist/timeSync42.xpi * -x "*.git*"
+      # 1. Signature Firefox (XPI)
+      # Ce script doit générer le fichier dans web-ext-artifacts/
+      - name: Sign Extension (Firefox)
+        run: npm run sign
+        env:
+          # On utilise les noms de secrets configurés dans vos paramètres
+          AMO_API_KEY: ${{ secrets.AMO_API_KEY }}
+          AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
 
-      # 5️⃣ Upload artifact
-      - name: Upload XPI artifact
-        uses: actions/upload-artifact@v4
+      # 2. Packaging Chrome (CRX)
+      - name: Build ZIP
+        run: npm run zip
+
+      - name: Sign CRX (Chrome)
+        uses: cardinalby/webext-buildtools-chrome-crx-action@v2
         with:
-          name: Orbit-xpi
-          path: dist/Orbit.xpi
+          zipFilePath: 'web-ext-artifacts/Orbit.zip'
+          crxFilePath: 'web-ext-artifacts/Orbit.crx'
+          privateKey: ${{ secrets.CHROME_PKEY }}
+
+      # 3. Création de la Release GitHub
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Récupère tous les fichiers générés
+          files: |
+            web-ext-artifacts/*.xpi
+            web-ext-artifacts/*.crx
+          generate_release_notes: true # Génère automatiquement le changelog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
