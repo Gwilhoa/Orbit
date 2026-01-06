@@ -2,7 +2,7 @@
     'use strict';
 
     let debounceTimer;
-    const EXAM_SEAT_COUNT = 0;
+    const EXAM_SEAT_COUNT = 30;
 
     function getGradient(rate) {
         if (rate > 90) return 'linear-gradient(135deg, #e53e3e 0%, #c53030 100%)';
@@ -50,14 +50,12 @@
                 const match = codeEl.textContent.match(/(\d+)/);
                 if (name && match) {
                     let count = parseInt(match[1]);
-                    console.log('Cluster:', name, 'Vacant posts:', count);
-
+                    let adjustedCount = count;
                     if (isExamMode && name.toLowerCase().includes('io')) {
-                        count = Math.max(0, count - EXAM_SEAT_COUNT);
-                        codeEl.innerHTML = `${count} vacant posts. <small class="exam-note">(${EXAM_SEAT_COUNT} réservés examen)</small>`;
+                        adjustedCount = Math.max(0, count - EXAM_SEAT_COUNT);
                     }
 
-                    clusterStats[name.toLowerCase()] = count;
+                    clusterStats[name.toLowerCase()] = adjustedCount;
                 }
             }
         });
@@ -203,7 +201,6 @@
 
         const allRects = document.querySelectorAll('.posts rect');
         let iMacCount = 0;
-        let usedImacCount = 0;
 
         allRects.forEach(rect => {
             const id = rect.getAttribute('id');
@@ -215,7 +212,6 @@
                 rect.classList.remove('laptop-spot');
                 rect.classList.remove('dead-spot');
                 iMacCount++;
-                if (rect.classList.contains('used')) usedImacCount++;
             }
 
             const x = parseFloat(rect.getAttribute('x'));
@@ -235,7 +231,6 @@
         });
 
         // ======= CALCUL DES POSTES DISPONIBLES =======
-        const currentTab = document.querySelector('.nav-pills li.active a');
         let availableSeats = 0;
 
             Object.keys(clusterStats).forEach(key => {
@@ -283,7 +278,7 @@ ${isExamMode ? `
       <div class="cluster-info-section">
         <div class="info-item">
           <span class="info-value">${availableSeats}</span>
-          <span class="info-label">libres ici</span>
+          <span class="info-label">postes libres</span>
         </div>
         <div class="stat-badge" style="background: ${getGradient(occupancyRate)}">
           ${occupancyRate}%
@@ -306,14 +301,20 @@ ${isExamMode ? `
             document.body.appendChild(tooltip);
         }
 
-        document.querySelectorAll('.posts image[data-tooltip-login]').forEach(img => {
+        document.querySelectorAll('.posts image').forEach(img => {
             img.onmouseenter = function() {
-                tooltip.textContent = `👤 ${this.getAttribute('data-tooltip-login')}`;
+                const user = this.getAttribute('data-tooltip-login');
+                const id = this.getAttribute('id');
+                if (user !== null) {
+                    tooltip.textContent = `👤 ${user}`;
+                } else {
+                    tooltip.textContent = `📍 ${id} disponible`;
+                }
                 tooltip.classList.add('show');
             };
             img.onmousemove = (e) => {
-                tooltip.style.left = (e.pageX + 10) + 'px';
-                tooltip.style.top = (e.pageY + 10) + 'px';
+                tooltip.style.left = (e.clientX + 10) + 'px';
+                tooltip.style.top = (e.clientY + 10) + 'px';
             };
             img.onmouseleave = () => tooltip.classList.remove('show');
         });
@@ -333,8 +334,8 @@ ${isExamMode ? `
                 tooltip.classList.add('show');
             };
             rect.onmousemove = (e) => {
-                tooltip.style.left = (e.pageX + 10) + 'px';
-                tooltip.style.top = (e.pageY + 10) + 'px';
+                tooltip.style.left = (e.clientX + 10) + 'px';
+                tooltip.style.top = (e.clientY + 10) + 'px';
             };
             rect.onmouseleave = () => tooltip.classList.remove('show');
         });
