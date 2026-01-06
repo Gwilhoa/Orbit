@@ -1,6 +1,6 @@
 {
   "name": "orbit",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Track your logtime, know exactly when to leave, and instantly spot a free seat with our redesigned interactive cluster map.",
   "main": "main.js",
   "scripts": {
@@ -11,7 +11,8 @@
     "zip": "mkdir -p web-ext-artifacts && zip -r web-ext-artifacts/Orbit.zip . -x '*.git*' 'node_modules/*' '*.zip' '*.DS_Store' '.idea/*'",
     "xpi": "jar cf Orbit.xpi manifest.json clusterPage.js clusterPage.css mainPage.js assets/",
     "sign": "web-ext sign --api-key=$AMO_API_KEY --api-secret=$AMO_API_SECRET --channel=unlisted",
-    "bump": "read -p 'Version (major, minor, patch): ' v && npm version $v -m 'release: v%s' && VERSION=$(node -p \"require('./package.json').version\") && jq \".version = \\\"$VERSION\\\"\" manifest.json > temp.json && mv temp.json manifest.json && git add manifest.json && git commit --amend --no-edit && read -p 'Confirmer le push ? (y/n): ' confirm && [[ $confirm == \"y\" ]] && git push --follow-tags"  },
+    "bump": "read -p 'Version (major, minor, patch): ' v && npm version $v -m 'release: v%s' && VERSION=$(node -p \"require('./package.json').version\") && jq \".version = \\\"$VERSION\\\"\" manifest.json > temp.json && mv temp.json manifest.json && git add manifest.json && git commit --amend --no-edit && read -p 'Confirmer le push ? (y/n): ' confirm && [[ $confirm == \"y\" ]] && git push --follow-tags"
+  },
   "keywords": [
     "chrome-extension",
     "firefox-extension",

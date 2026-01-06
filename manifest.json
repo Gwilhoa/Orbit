@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Orbit",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "description": "Track your logtime, know exactly when to leave, and instantly spot a free seat with our redesigned interactive cluster map.",
   "browser_specific_settings": {
     "gecko": {
@@ -11,14 +11,24 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://profile.intra.42.fr/*"],
-      "js": ["mainPage.js"],
+      "matches": [
+        "https://profile.intra.42.fr/*"
+      ],
+      "js": [
+        "mainPage.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://meta.intra.42.fr/clusters*"],
-      "js": ["clusterPage.js"],
-      "css": ["clusterPage.css"],
+      "matches": [
+        "*://meta.intra.42.fr/clusters*"
+      ],
+      "js": [
+        "clusterPage.js"
+      ],
+      "css": [
+        "clusterPage.css"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -29,7 +39,9 @@
         "assets/86_bus.svg",
         "assets/transit.png"
       ],
-      "matches": ["https://profile.intra.42.fr/*"]
+      "matches": [
+        "https://profile.intra.42.fr/*"
+      ]
     }
   ],
   "permissions": [
