@@ -1,6 +1,6 @@
 {
   "name": "orbit",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "Track your logtime, know exactly when to leave, and instantly spot a free seat with our redesigned interactive cluster map.",
   "main": "main.js",
   "scripts": {
@@ -8,9 +8,10 @@
     "dev": "echo 'Load extension in Chrome developer mode'",
     "lint": "echo 'main.js:270 - No linter configured'",
     "test": "echo 'No tests configured'",
-    "zip": "zip -r Orbit.zip . -x '*.git*' 'node_modules/*' '*.zip' '*.DS_Store' '.idea/*'",
-    "xpi": "jar cf Orbit.xpi manifest.json main.js assets/",
-    "sign": "web-ext sign --api-key=$AMO_API_KEY --api-secret=$AMO_API_SECRET"
+    "zip": "mkdir -p web-ext-artifacts && zip -r web-ext-artifacts/Orbit.zip . -x '*.git*' 'node_modules/*' '*.zip' '*.DS_Store' '.idea/*'",
+    "xpi": "jar cf Orbit.xpi manifest.json clusterPage.js clusterPage.css mainPage.js assets/",
+    "sign": "web-ext sign --api-key=$AMO_API_KEY --api-secret=$AMO_API_SECRET --channel=unlisted",
+    "bump": "read -p 'Version (major, minor, patch): ' v && npm version $v -m 'release: v%s' && read -p 'Confirmer le push ? (y/n): ' confirm && [[ $confirm == \"y\" ]] && git push --follow-tags"
   },
   "keywords": [
     "chrome-extension",
