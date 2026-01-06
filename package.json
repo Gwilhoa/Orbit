@@ -1,6 +1,6 @@
 {
   "name": "orbit",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Track your logtime, know exactly when to leave, and instantly spot a free seat with our redesigned interactive cluster map.",
   "main": "main.js",
   "scripts": {
