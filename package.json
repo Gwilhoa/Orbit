@@ -1,7 +1,7 @@
 {
   "name": "orbit",
   "version": "1.1.0",
-  "description": "Track your logtime, know exactly when to leave, and instantly spot a free seat with our redesigned interactive cluster map.",
+  "description": "Track your logtime and know exactly when to leave with integrated transit departures.",
   "main": "main.js",
   "scripts": {
     "build": "echo 'No build process needed for manifest v3'",
@@ -9,7 +9,7 @@
     "lint": "echo 'main.js:270 - No linter configured'",
     "test": "echo 'No tests configured'",
     "zip": "mkdir -p web-ext-artifacts && zip -r web-ext-artifacts/Orbit.zip . -x '*.git*' 'node_modules/*' '*.zip' '*.DS_Store' '.idea/*'",
-    "xpi": "jar cf Orbit.xpi manifest.json clusterPage.js clusterPage.css mainPage.js assets/",
+    "xpi": "jar cf Orbit.xpi manifest.json mainPage.js assets/",
     "sign": "web-ext sign --api-key=$AMO_API_KEY --api-secret=$AMO_API_SECRET --channel=unlisted",
     "version": "node -e \"const fs = require('fs'); const m = JSON.parse(fs.readFileSync('manifest.json')); m.version = process.env.npm_package_version; fs.writeFileSync('manifest.json', JSON.stringify(m, null, 2));\" && git add manifest.json",
     "bump": "read -p 'Version (major, minor, patch): ' v && npm version $v -m 'release: v%s' && read -p 'Confirmer le push ? (y/n): ' confirm && [[ $confirm == \"y\" ]] && git push --follow-tags"
