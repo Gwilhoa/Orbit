@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Orbit",
   "version": "1.1.0",
-  "description": "Track your logtime, know exactly when to leave, and instantly spot a free seat with our redesigned interactive cluster map.",
+  "description": "Track your logtime and know exactly when to leave with integrated transit departures.",
   "browser_specific_settings": {
     "gecko": {
       "id": "@Orbit",
@@ -16,18 +16,6 @@
       ],
       "js": [
         "mainPage.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "*://meta.intra.42.fr/clusters*"
-      ],
-      "js": [
-        "clusterPage.js"
-      ],
-      "css": [
-        "clusterPage.css"
       ],
       "run_at": "document_idle"
     }
