@@ -724,7 +724,7 @@ function makeUserPosteClickable() {
 
     const login = getProfileLogin();
     const url = login
-        ? `https://matrix.42lyon.fr/#/user/@${login}:42lyon.fr`
+        ? `https://matrix.42lyon.fr/?user=${login}`
         : "https://matrix.42lyon.fr/";
 
     poste.dataset.orbitMatrix = "true";
