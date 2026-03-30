@@ -1,6 +1,6 @@
 {
   "name": "orbit",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Track your logtime and know exactly when to leave with integrated transit departures.",
   "main": "main.js",
   "scripts": {

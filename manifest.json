@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Orbit",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Track your logtime and know exactly when to leave with integrated transit departures.",
   "browser_specific_settings": {
     "gecko": {
