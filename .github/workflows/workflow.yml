@@ -32,6 +32,8 @@ jobs:
           # On utilise les noms de secrets configurés dans vos paramètres
           AMO_API_KEY: ${{ secrets.AMO_API_KEY }}
           AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+      - name: Renamed Firefox artifact
+        run: mv web-ext-artifacts/*.xpi web-ext-artifacts/Orbit.xpi
 
       # 2. Packaging Chrome (CRX)
       - name: Build ZIP
