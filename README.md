@@ -11,13 +11,18 @@ Browser extension providing essential tools for 42 students including logtime tr
 
 ## Installation
 
-### Chrome
+[<img src="https://lh4.ggpht.com/x-plP9YZXhCaiDkTKQ5S29PwLmdi4feEKrMOtQle4NuoOaUgKUMH9pPWIg91da3anhSmw-G8erEIuU0d" width="128" alt="Google Chrome" title="Download for Google Chrome">](https://chromewebstore.google.com/detail/orbit/aehigcljfmpiklaeflkpnekohfgnbdpf)
+[<img src="https://www.mozilla.org/media/img/structured-data/logo-firefox-browser.fbc7ffbb50fd.png" width="128" alt="Mozilla Firefox" title="Download for Mozilla Firefox">](https://github.com/Gwilhoa/Orbit/releases/latest/download/Orbit.xpi)
+
+### Manual
+
+#### Chrome
 1. Download the extension files
 2. Open Chrome and go to `chrome://extensions/`
 3. Enable "Developer mode"
 4. Click "Load unpacked" and select the extension directory
 
-### Firefox
+#### Firefox
 **Option 1: Temporary Installation (Recommended for Development)**
 1. Open Firefox and go to `about:debugging`
 2. Click "This Firefox" in the sidebar
