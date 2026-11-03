@@ -26,7 +26,7 @@
 
 ## Project Structure
 - Content script runs on `https://profile.intra.42.fr/*`
-- Uses transit.gchatain.fr API for transit data
+- Uses transit.gchatain.fr API (`GET /api/transit/timetable`) for transit data: max 1 call / 5 min, none while the tab is hidden, last timetable cached in localStorage
 - Assets in `/assets/` directory
 - Manifest v3 extension format (requires browser_specific_settings.gecko.id for Firefox)
 - Firefox extensions require signing for permanent installation (use temporary loading for development)

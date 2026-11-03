@@ -5,7 +5,7 @@ Browser extension providing essential tools for 42 students including logtime tr
 ## Features
 
 - **Logtime Tracking**: Displays current logtime with progress bar and target time calculation
-- **Bus Schedule**: Shows next departures for TCL lines 5 and 86 from stop TCLFR:95258
+- **Bus Schedule**: Shows the next two departures (in minutes) of every TCL line serving the "Campus Région numérique" stop, per direction; a wifi icon marks buses tracked in real time and the (i) button lists every upcoming time
 - **Smart Timing**: Option to restrict workday to start at 8:00 AM
 - **Real-time Updates**: Live bus departure information with real-time indicators
 
@@ -79,4 +79,6 @@ npm run xpi
 ## API
 
 Uses the transit.gchatain.fr API for TCL transit data:
-`https://transit.gchatain.fr/api/transit/next-bus?stopId=TCLFR:95258`
+`https://transit.gchatain.fr/api/transit/timetable`
+
+One call returns every line and direction of the campus stop (no stop id on the client side). The extension refreshes at most once every 5 minutes, only while the tab is visible, and honours `Retry-After` on 429/503 errors.
