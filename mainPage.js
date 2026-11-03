@@ -311,7 +311,7 @@ function getProgressColor(currentMinutes) {
 }
 
 function buildBusApiUrl() {
-    return `https://api.bitume2000.fr/api/transit/next-bus?stopId=${BUS_STOP_ID}`;
+    return `https://transit.gchatain.fr/api/transit/next-bus?stopId=${BUS_STOP_ID}`;
 }
 
 // ======================== PROFILE BANNER UPGRADE ========================

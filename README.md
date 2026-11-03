@@ -78,5 +78,5 @@ npm run xpi
 
 ## API
 
-Uses the Bitume2000 API for TCL transit data:
-`https://api.bitume2000.fr/api/transit/next-bus?stopId=TCLFR:95258`
+Uses the transit.gchatain.fr API for TCL transit data:
+`https://transit.gchatain.fr/api/transit/next-bus?stopId=TCLFR:95258`
