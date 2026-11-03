@@ -1,12 +1,15 @@
-const urlBus5 = chrome.runtime.getURL("assets/5_bus.svg");
-const urlBus86 = chrome.runtime.getURL("assets/86_bus.svg");
 const transitLogoUrl = chrome.runtime.getURL("assets/transit.png");
 
-const BUS_LINES = ["5", "86"];
-const BUS_STOP_ID = "TCLFR:95258";
+const BUS_API_URL = "https://transit.gchatain.fr/api/transit/timetable";
 const BUS_UPDATE_MS = 30000;
 const BUS_REFRESH_MS = 300000;
-const MAX_DEPARTURES = 10;
+const BUS_QUOTA_BACKOFF_MS = 1800000;
+const BUS_MAX_TIMEOUT_MS = 2147483647;
+const BUS_PAST_GRACE_MS = 60000;
+const BUS_NEXT_COUNT = 2;
+const BUS_CACHE_KEY = "orbit-bus-timetable";
+const BUS_TIMEZONE = "Europe/Paris";
+const BUS_LINE_ICONS = ["86", "105", "132", "216"];
 
 const PROFILE_BANNER_STYLE_ID = "orbit-profile-upgrade-style";
 const BUS_STYLE_ID = "orbit-bus-style";
@@ -276,13 +279,6 @@ function calculateTargetLogtime(currentMinutes, restrictEnabled = false) {
     };
 }
 
-function normalizeRouteDepartures(data) {
-    const source = data?.route_departures ?? data;
-    if (Array.isArray(source)) return source;
-    if (source && typeof source === "object") return Object.values(source);
-    return [];
-}
-
 function getSeverityRank(severity) {
     const ranks = {
         Severe: 4,
@@ -308,10 +304,6 @@ function getProgressColor(currentMinutes) {
     if (currentMinutes >= 6 * 60 + 39) return "#fdd201";
     if (currentMinutes >= 6 * 60 + 18) return "#FF9800";
     return "#F44336";
-}
-
-function buildBusApiUrl() {
-    return `https://transit.gchatain.fr/api/transit/next-bus?stopId=${BUS_STOP_ID}`;
 }
 
 // ======================== PROFILE BANNER UPGRADE ========================
@@ -403,166 +395,590 @@ async function displayLogtime(depth = 0) {
 }
 
 // ======================== BUS ========================
-function extractAlertsByLine(routes, linesFilter = []) {
-    const byLine = new Map();
+const parisTimeFormat = new Intl.DateTimeFormat("fr-FR", { timeZone: BUS_TIMEZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+const parisDayPartsFormat = new Intl.DateTimeFormat("en-US", { timeZone: BUS_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" });
+const parisDayLabelFormat = new Intl.DateTimeFormat("fr-FR", { timeZone: BUS_TIMEZONE, weekday: "long", day: "numeric", month: "long" });
 
-    routes.forEach((route) => {
-        const line = route?.route_short_name;
-        if (!line || (linesFilter.length > 0 && !linesFilter.includes(line))) return;
-        if (!route?.alerts?.length) return;
+let busState = loadBusState() ?? createEmptyBusState();
+let busTimer = null;
+let busInFlight = false;
+let busListenersReady = false;
 
-        const group = byLine.get(line) || { line, severity: "Info", alerts: [], seen: new Set() };
-        route.alerts.forEach((alert) => {
-            const key = `${alert.title || ""}|${alert.description || ""}`;
-            if (group.seen.has(key)) return;
-            group.seen.add(key);
-
-            const firstPeriod = alert.active_periods?.[0];
-            const startsAt = firstPeriod?.start ? new Date(firstPeriod.start * 1000) : null;
-            const endsAt = firstPeriod?.end ? new Date(firstPeriod.end * 1000) : null;
-            const severity = alert.severity || "Info";
-
-            if (getSeverityRank(severity) > getSeverityRank(group.severity)) {
-                group.severity = severity;
-            }
-
-            group.alerts.push({
-                severity,
-                title: alert.title || "Alerte trafic",
-                description: alert.description || "",
-                startsAt,
-                endsAt
-            });
-        });
-
-        if (group.alerts.length > 0) {
-            byLine.set(line, group);
-        }
-    });
-
-    return Array.from(byLine.values())
-        .map((group) => ({ ...group, seen: undefined }))
-        .sort((a, b) => getSeverityRank(b.severity) - getSeverityRank(a.severity));
+class BusApiError extends Error {
+    constructor(status, message, retryAfterMs = null) {
+        super(message);
+        this.status = status;
+        this.retryAfterMs = retryAfterMs;
+    }
 }
 
-function collectDepartures(routeDepartures) {
-    const departures = [];
-    const now = new Date();
+function createEmptyBusState() {
+    return { data: null, stale: false, fetchedAt: 0, lastAttemptAt: 0, blockedUntil: 0, error: null };
+}
 
-    routeDepartures.forEach((route) => {
-        if (!BUS_LINES.includes(route?.route_short_name)) return;
+function loadBusState() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(BUS_CACHE_KEY));
+        if (raw && typeof raw === "object") return { ...createEmptyBusState(), ...raw };
+    } catch {
+        // cache absent ou illisible : on repart de zéro
+    }
+    return null;
+}
 
-        (route.itineraries || []).forEach((itinerary) => {
-            (itinerary.schedule_items || []).forEach((item) => {
-                const depart = new Date(item.departure_time * 1000);
-                const diffMin = Math.round((depart - now) / 60000);
-                if (diffMin < 0 || diffMin > 60) return;
+function saveBusState() {
+    try {
+        localStorage.setItem(BUS_CACHE_KEY, JSON.stringify(busState));
+    } catch {
+        // stockage plein ou indisponible : l'état reste en mémoire
+    }
+}
 
-                departures.push({
-                    ligne: route.route_short_name,
-                    direction: itinerary.direction_headsign,
-                    depart,
-                    temps_reel: item.is_real_time,
-                    annule: item.is_cancelled
-                });
-            });
+function formatParisTime(ms) {
+    return parisTimeFormat.format(ms).replace(":", "h");
+}
+
+function getParisDayKey(ms) {
+    const parts = Object.fromEntries(parisDayPartsFormat.formatToParts(ms).map((p) => [p.type, p.value]));
+    return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function shiftDayKey(key, days) {
+    const [year, month, day] = key.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+function getDayLabel(dayKey, todayKey, ms) {
+    if (dayKey === todayKey) return "Aujourd'hui";
+    if (dayKey === shiftDayKey(todayKey, 1)) return "Demain";
+    const label = parisDayLabelFormat.format(ms);
+    return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function safeHexColor(value, fallback) {
+    return /^[0-9a-f]{3,8}$/i.test(value || "") ? `#${value}` : fallback;
+}
+
+function parseRetryAfterMs(value) {
+    if (!value) return null;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds) * 1000;
+    const date = Date.parse(value);
+    return Number.isNaN(date) ? null : Math.max(0, date - Date.now());
+}
+
+function getBusErrorMessage(status) {
+    if (status === 400) return "service non configuré";
+    if (status === 404) return "route introuvable";
+    if (status === 429) return "limite de requêtes atteinte";
+    if (status === 503) return "quota mensuel épuisé";
+    if (status === 502) return "fournisseur indisponible";
+    return "service injoignable";
+}
+
+function getBusNextAllowedAt() {
+    return Math.max(busState.lastAttemptAt + BUS_REFRESH_MS, busState.blockedUntil);
+}
+
+// ---------- Alertes ----------
+function parseAlertDate(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const date = new Date(typeof value === "number" && value < 1e12 ? value * 1000 : value);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getAlertSeverity(alert) {
+    if (["Severe", "Warning", "Info"].includes(alert.severity)) return alert.severity;
+    if (["NO_SERVICE", "SIGNIFICANT_DELAYS"].includes(alert.effect)) return "Severe";
+    if (["REDUCED_SERVICE", "DETOUR", "MODIFIED_SERVICE", "STOP_MOVED"].includes(alert.effect)) return "Warning";
+    return "Info";
+}
+
+function normalizeBusAlerts(busAlerts) {
+    const seen = new Set();
+    const alerts = [];
+
+    (Array.isArray(busAlerts) ? busAlerts : []).forEach((alert) => {
+        if (!alert || typeof alert !== "object") return;
+        const key = `${alert.title || ""}|${alert.description || ""}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+
+        const firstPeriod = alert.active_periods?.[0];
+        alerts.push({
+            severity: getAlertSeverity(alert),
+            title: alert.title || "Alerte trafic",
+            description: alert.description || "",
+            createdAt: parseAlertDate(alert.created_at),
+            startsAt: parseAlertDate(firstPeriod?.start),
+            endsAt: parseAlertDate(firstPeriod?.end)
         });
     });
 
-    departures.sort((a, b) => a.depart - b.depart);
-    return departures;
+    return alerts;
 }
 
-function createAlertAccordion(group) {
-    const theme = getSeverityTheme(group.severity);
+function createAlertItem(alert) {
+    const theme = getSeverityTheme(alert.severity);
     const details = document.createElement("details");
-    details.style.cssText = `border:1px solid ${theme.border}; border-radius:10px; background:${theme.bg}; overflow:hidden;`;
+    details.className = "orbit-alert";
+    details.dataset.key = `${alert.title}|${alert.description}`;
+    details.style.cssText = `border:1px solid ${theme.border}; border-radius:10px; background:${theme.bg}; overflow:hidden; flex:0 0 auto;`;
 
     const summary = document.createElement("summary");
-    summary.style.cssText = "list-style:none; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 9px;";
+    summary.style.cssText = "list-style:none; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 9px;";
     summary.innerHTML = `
         <div style="display:flex; align-items:center; gap:8px; min-width:0;">
-            <span style="display:inline-flex; color:${theme.color};">
+            <span style="display:inline-flex; flex-shrink:0; color:${theme.color};">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M12 3 1 21h22L12 3zm1 14h-2v-2h2v2zm0-4h-2V8h2v5z"/>
                 </svg>
             </span>
-            <strong style="font-size:12px; color:${theme.color}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                Ligne ${group.line} - ${group.alerts.length} alerte${group.alerts.length > 1 ? "s" : ""}
-            </strong>
+            <strong class="orbit-alert-title" style="font-size:12px; color:${theme.color}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></strong>
         </div>
-        <span style="font-size:10px; color:${theme.color}; background:${theme.badgeBg}; border:1px solid ${theme.border}; border-radius:999px; padding:3px 6px;">
-            ${group.severity}
-        </span>
+        <span class="orbit-alert-severity" style="flex-shrink:0; font-size:10px; color:${theme.color}; background:${theme.badgeBg}; border:1px solid ${theme.border}; border-radius:999px; padding:2px 6px;"></span>
     `;
+    summary.querySelector(".orbit-alert-title").textContent = alert.title;
+    summary.querySelector(".orbit-alert-severity").textContent = alert.severity;
 
-    const panel = document.createElement("div");
-    panel.style.cssText = "padding:0 9px 9px 9px; display:flex; flex-direction:column; gap:7px;";
+    let dateLabel = "";
+    if (alert.startsAt || alert.endsAt) {
+        dateLabel = `Période: ${alert.startsAt ? formatDateTime(alert.startsAt) : "?"} -> ${alert.endsAt ? formatDateTime(alert.endsAt) : "?"}`;
+    } else if (alert.createdAt) {
+        dateLabel = `Publiée le ${formatDateTime(alert.createdAt)}`;
+    }
 
-    group.alerts.forEach((alert) => {
-        const periodLabel = alert.startsAt || alert.endsAt
-            ? `Période: ${alert.startsAt ? formatDateTime(alert.startsAt) : "?"} -> ${alert.endsAt ? formatDateTime(alert.endsAt) : "?"}`
-            : "";
-
-        const alertItem = document.createElement("div");
-        alertItem.style.cssText = "padding:7px 8px; border-radius:8px; border:1px solid rgba(0,0,0,0.08); background:#ffffffcc;";
-        alertItem.innerHTML = `
-            <div style="font-size:12px; font-weight:700; color:#111827; margin-bottom:2px;">${alert.title}</div>
-            ${periodLabel ? `<div style="font-size:11px; color:#6b7280; margin-bottom:3px;">${periodLabel}</div>` : ""}
-            <div style="font-size:12px; color:#374151;">${alert.description}</div>
-        `;
-        panel.appendChild(alertItem);
-    });
+    const body = document.createElement("div");
+    body.style.cssText = "margin:0 9px 9px 9px; padding:7px 8px; border-radius:8px; border:1px solid rgba(0,0,0,0.08); background:#ffffffcc;";
+    body.innerHTML = `
+        <div class="orbit-alert-date" style="font-size:11px; color:#6b7280; margin-bottom:3px;"></div>
+        <div class="orbit-alert-desc" style="font-size:12px; color:#374151;"></div>
+    `;
+    body.querySelector(".orbit-alert-date").textContent = dateLabel;
+    body.querySelector(".orbit-alert-desc").textContent = alert.description;
+    if (!dateLabel) body.querySelector(".orbit-alert-date").remove();
 
     details.appendChild(summary);
-    details.appendChild(panel);
+    details.appendChild(body);
     return details;
 }
 
+function renderBusAlerts(tclContainer) {
+    const alertsBtn = tclContainer.querySelector(".orbit-alerts-btn");
+    const alertsPanel = tclContainer.querySelector(".orbit-alerts-panel");
+    const alerts = normalizeBusAlerts(busState.data?.busAlerts);
 
-function createDepartureCard(dep, now) {
-    const card = document.createElement("div");
-    card.className = "departure-item";
-    card.dataset.departure = dep.depart.toISOString();
-    card.dataset.annule = dep.annule;
-    card.dataset.tempsReel = dep.temps_reel;
-    card.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; border:1px solid #edf1f5; border-radius:10px; padding:8px 9px; margin-bottom:7px; background:#fff;";
+    const openKeys = new Set([...alertsPanel.querySelectorAll("details[open]")].map((d) => d.dataset.key));
+    alertsPanel.innerHTML = "";
+    if (alerts.length === 0) {
+        alertsBtn.style.display = "none";
+        alertsPanel.style.display = "none";
+        return;
+    }
 
-    const diffMin = Math.round((dep.depart - now) / 60000);
-    card.innerHTML = `
-        <div class="departure-left" style="display:flex; gap:9px; align-items:center; min-width:0;">
-            <img src="${dep.ligne === "86" ? urlBus86 : urlBus5}" alt="Ligne ${dep.ligne}" width="48" height="48">
-            <div style="display:flex; flex-direction:column; gap:2px; min-width:0;">
-                <span style="font-weight:700; color:#111827;">Ligne ${dep.ligne}</span>
-                <span style="font-size:12px; color:#4b5563; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">→ ${dep.direction}</span>
-            </div>
-        </div>
-        <div class="departure-right" style="display:flex; align-items:center; gap:7px; font-weight:bold; flex-shrink:0;">
-            <span class="departure-time"></span>
-            ${dep.temps_reel ? `
-                <div class="wifi-icon" style="color:green; animation:pulse 1.5s infinite;">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
-                        <path d="M8.5 16.05a6 6 0 0 1 7 0"/>
-                        <line x1="12" y1="20" x2="12" y2="20"/>
-                    </svg>
-                </div>` : ""}
-        </div>
-    `;
+    const severity = alerts.reduce((max, a) => (getSeverityRank(a.severity) > getSeverityRank(max) ? a.severity : max), "Info");
+    alerts.forEach((alert) => {
+        const item = createAlertItem(alert);
+        item.open = openKeys.has(item.dataset.key);
+        alertsPanel.appendChild(item);
+    });
 
-    updateTimeDisplay(card.querySelector(".departure-time"), diffMin, dep.annule);
-    return card;
+    const theme = getSeverityTheme(severity);
+    alertsBtn.style.cssText += `display:flex; color:${theme.color}; background:${theme.bg}; border-color:${theme.border};`;
+    alertsBtn.querySelector(".orbit-alerts-count").textContent = `${alerts.length} alerte${alerts.length > 1 ? "s" : ""}`;
 }
 
-function updateDepartureTimes(container) {
-    const now = new Date();
-    container.querySelectorAll(".departure-item").forEach((card) => {
-        const departTime = new Date(card.dataset.departure);
-        const annule = card.dataset.annule === "true";
-        const diffMin = Math.round((departTime - now) / 60000);
-        updateTimeDisplay(card.querySelector(".departure-time"), diffMin, annule, true);
+// ---------- Horaires ----------
+const parisWeekdayFormat = new Intl.DateTimeFormat("fr-FR", { timeZone: BUS_TIMEZONE, weekday: "short" });
+const busExpanded = new Set();
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const WIFI_ICON_PATHS = ["M2 8.8a15 15 0 0 1 20 0", "M5 12.6a10.5 10.5 0 0 1 14 0", "M8.5 16.3a5.5 5.5 0 0 1 7 0", "M12 20h.01"];
+
+function createWifiIcon() {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("width", "12");
+    svg.setAttribute("height", "12");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2.6");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    WIFI_ICON_PATHS.forEach((d) => {
+        const path = document.createElementNS(SVG_NS, "path");
+        path.setAttribute("d", d);
+        svg.appendChild(path);
     });
+
+    const icon = document.createElement("span");
+    icon.className = "orbit-bus-live";
+    icon.style.cssText = "display:inline-flex; flex-shrink:0; animation:pulse 1.5s infinite;";
+    icon.appendChild(svg);
+    return icon;
+}
+
+function getDirectionKey(line, direction) {
+    return `${line.routeId}|${direction?.stopId}|${direction?.directionId}`;
+}
+
+function getUpcomingDepartures(direction, nowMs) {
+    return (direction?.departures || [])
+        .filter((dep) => Number.isFinite(dep?.departureTime) && dep.departureTime * 1000 >= nowMs - BUS_PAST_GRACE_MS);
+}
+
+// Les N prochains départs réels ; un supprimé qui les précède reste affiché (barré) sans compter.
+function pickNextDepartures(departures) {
+    const picked = [];
+    let valid = 0;
+    let cancelled = 0;
+
+    for (const dep of departures) {
+        if (dep.cancelled === true) {
+            if (cancelled < 1) {
+                picked.push(dep);
+                cancelled++;
+            }
+            continue;
+        }
+        picked.push(dep);
+        valid++;
+        if (valid >= BUS_NEXT_COUNT) break;
+    }
+
+    return picked;
+}
+
+function formatDepartureLabel(depMs, nowMs) {
+    const diffMin = Math.round((depMs - nowMs) / 60000);
+    if (diffMin <= 0) return "<1 min";
+    if (diffMin < 60) return `${diffMin} min`;
+
+    const time = formatParisTime(depMs);
+    const todayKey = getParisDayKey(nowMs);
+    const dayKey = getParisDayKey(depMs);
+    if (dayKey === todayKey) return time;
+    if (dayKey === shiftDayKey(todayKey, 1)) return `dem. ${time}`;
+    return `${parisWeekdayFormat.format(depMs)} ${time}`;
+}
+
+function groupDeparturesByDay(departures, nowMs) {
+    const todayKey = getParisDayKey(nowMs);
+    const groups = [];
+
+    departures.forEach((dep) => {
+        const ms = dep.departureTime * 1000;
+        const key = getParisDayKey(ms);
+        let group = groups[groups.length - 1];
+        if (!group || group.key !== key) {
+            group = { key, label: getDayLabel(key, todayKey, ms), items: [] };
+            groups.push(group);
+        }
+        group.items.push(dep);
+    });
+
+    return groups;
+}
+
+function getDepartureStatus(dep) {
+    const cancelled = dep.cancelled === true;
+    const delaySec = Number.isFinite(dep.scheduledTime) ? dep.departureTime - dep.scheduledTime : 0;
+    const delayed = !cancelled && delaySec !== 0;
+    return {
+        cancelled,
+        delayed,
+        delayMin: Math.round(delaySec / 60),
+        live: !cancelled && dep.realTime === true
+    };
+}
+
+function getDepartureTitle(dep, status) {
+    const clock = formatParisTime(dep.departureTime * 1000);
+    if (status.cancelled) return `Supprimé (prévu à ${clock})`;
+    if (status.delayed) {
+        const scheduled = formatParisTime(dep.scheduledTime * 1000);
+        return `${clock} · prévu à ${scheduled}${status.delayMin ? ` (${status.delayMin > 0 ? "+" : ""}${status.delayMin} min)` : ""}`;
+    }
+    return `${clock} · ${status.live ? "temps réel (bus suivi)" : "horaire théorique"}`;
+}
+
+function appendDelayTag(parent, status) {
+    if (!status.delayed || !status.delayMin) return;
+    const tag = document.createElement("span");
+    tag.style.cssText = "font-size:10px; font-weight:700; padding:0 4px; border-radius:4px; background:#fff7ed; color:#c2410c;";
+    tag.textContent = `${status.delayMin > 0 ? "+" : ""}${status.delayMin}`;
+    parent.appendChild(tag);
+}
+
+// Pastille « métro » : temps restant, wifi si le bus est suivi en temps réel.
+function createTimePill(dep, nowMs, isFirst) {
+    const status = getDepartureStatus(dep);
+    const depMs = dep.departureTime * 1000;
+
+    let color = "#374151";
+    if (status.cancelled) color = "#9ca3af";
+    else if (status.delayed) color = "#c2410c";
+    else if (status.live) color = "#15803d";
+
+    const pill = document.createElement("span");
+    pill.className = "orbit-bus-pill";
+    pill.title = getDepartureTitle(dep, status);
+    pill.dataset.cancelled = String(status.cancelled);
+    pill.dataset.delayed = String(status.delayed);
+    pill.dataset.realTime = String(status.live);
+    pill.style.cssText = `display:inline-flex; align-items:center; gap:3px; white-space:nowrap; color:${color}; font-size:${isFirst ? 14 : 12.5}px; font-weight:${isFirst ? 800 : 700}; ${status.cancelled ? "text-decoration:line-through; font-weight:600; font-size:12px;" : ""}`;
+
+    const label = document.createElement("span");
+    label.textContent = status.cancelled ? formatParisTime(depMs) : formatDepartureLabel(depMs, nowMs);
+    pill.appendChild(label);
+
+    if (status.live) pill.appendChild(createWifiIcon());
+    appendDelayTag(pill, status);
+    return pill;
+}
+
+// Puce de la liste complète : heure exacte.
+function createDepartureChip(dep) {
+    const status = getDepartureStatus(dep);
+
+    let color = "#111827";
+    let background = "#ffffff";
+    let border = "#e5e7eb";
+    if (status.cancelled) {
+        color = "#9ca3af";
+        background = "#f3f4f6";
+    } else if (status.delayed) {
+        color = "#9a3412";
+        background = "#fff7ed";
+        border = "#fed7aa";
+    } else if (status.live) {
+        color = "#166534";
+        background = "#f0fdf4";
+        border = "#bbf7d0";
+    }
+
+    const chip = document.createElement("span");
+    chip.className = "orbit-bus-departure";
+    chip.title = getDepartureTitle(dep, status);
+    chip.dataset.cancelled = String(status.cancelled);
+    chip.dataset.delayed = String(status.delayed);
+    chip.dataset.realTime = String(status.live);
+    chip.style.cssText = `display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border-radius:6px; border:1px solid ${border}; background:${background}; color:${color}; font-size:12px; line-height:18px; font-weight:700; ${status.cancelled ? "text-decoration:line-through;" : ""}`;
+
+    const time = document.createElement("span");
+    time.textContent = formatParisTime(dep.departureTime * 1000);
+    chip.appendChild(time);
+
+    if (status.live) chip.appendChild(createWifiIcon());
+    appendDelayTag(chip, status);
+    return chip;
+}
+
+function createAllDeparturesPanel(departures, nowMs) {
+    const panel = document.createElement("div");
+    panel.className = "orbit-bus-all";
+    panel.style.cssText = "display:flex; flex-direction:column; gap:4px; padding:6px 8px; border-radius:8px; background:#f8fafc;";
+
+    const groups = groupDeparturesByDay(departures, nowMs);
+    const showLabels = groups.length > 1 || groups[0].label !== "Aujourd'hui";
+    groups.forEach((group) => {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex; flex-wrap:wrap; align-items:center; gap:4px;";
+        if (showLabels) {
+            const label = document.createElement("span");
+            label.className = "orbit-bus-day";
+            label.style.cssText = "font-size:11px; font-weight:700; color:#6b7280; margin-right:2px;";
+            label.textContent = group.label;
+            row.appendChild(label);
+        }
+        group.items.forEach((dep) => row.appendChild(createDepartureChip(dep)));
+        panel.appendChild(row);
+    });
+
+    return panel;
+}
+
+function createInfoButton(headsign, expanded) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "orbit-bus-info";
+    button.textContent = "i";
+    button.title = "Voir tous les prochains horaires";
+    button.setAttribute("aria-label", `Tous les prochains horaires vers ${headsign}`);
+    button.setAttribute("aria-expanded", String(expanded));
+    button.style.cssText = `flex:0 0 18px; width:18px; height:18px; padding:0; border-radius:50%; border:1px solid ${expanded ? "#00babc" : "#cbd5e1"}; background:${expanded ? "#00babc" : "#fff"}; color:${expanded ? "#fff" : "#64748b"}; font:italic 700 11px/16px Georgia, serif; cursor:pointer; text-align:center;`;
+    return button;
+}
+
+function createDirectionBlock(line, direction, nowMs) {
+    const departures = getUpcomingDepartures(direction, nowMs);
+    const picked = pickNextDepartures(departures);
+    const key = getDirectionKey(line, direction);
+    const headsign = direction?.headsign || "Destination inconnue";
+    const hasMore = departures.length > picked.length;
+    const expanded = hasMore && busExpanded.has(key);
+
+    const block = document.createElement("div");
+    block.className = "orbit-bus-direction";
+    block.style.cssText = "display:flex; flex-direction:column; gap:5px; min-width:0;";
+
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex; align-items:center; gap:8px; min-width:0;";
+
+    const headsignEl = document.createElement("span");
+    headsignEl.style.cssText = "flex:1 1 0; min-width:0; font-size:12px; font-weight:700; color:#202026; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;";
+    headsignEl.textContent = headsign;
+    headsignEl.title = headsign;
+    row.appendChild(headsignEl);
+
+    const pills = document.createElement("div");
+    pills.style.cssText = "display:flex; align-items:center; justify-content:flex-end; gap:9px; flex:0 0 auto;";
+    if (picked.length === 0) {
+        const empty = document.createElement("em");
+        empty.style.cssText = "font-size:11px; color:#6b7280;";
+        empty.textContent = "Aucun départ";
+        pills.appendChild(empty);
+    } else {
+        let first = true;
+        picked.forEach((dep) => {
+            pills.appendChild(createTimePill(dep, nowMs, first && dep.cancelled !== true));
+            if (dep.cancelled !== true) first = false;
+        });
+    }
+    row.appendChild(pills);
+
+    if (hasMore) {
+        const button = createInfoButton(headsign, expanded);
+        button.addEventListener("click", () => {
+            if (busExpanded.has(key)) busExpanded.delete(key);
+            else busExpanded.add(key);
+            renderBusDepartures(button.closest("[data-orbit-bus-container]"));
+        });
+        row.appendChild(button);
+    } else {
+        const spacer = document.createElement("span");
+        spacer.style.cssText = "flex:0 0 18px;";
+        row.appendChild(spacer);
+    }
+    block.appendChild(row);
+
+    if (expanded) block.appendChild(createAllDeparturesPanel(departures, nowMs));
+
+    return { block, hasDepartures: picked.length > 0 };
+}
+
+function createLineBadge(line) {
+    const badge = document.createElement("span");
+    badge.className = "orbit-bus-badge";
+    badge.title = line.longName || "";
+    badge.style.cssText = `display:inline-block; min-width:34px; text-align:center; padding:3px 8px; border-radius:6px; font-size:14px; font-weight:800; flex-shrink:0; background:${safeHexColor(line.color, "#4b5563")}; color:${safeHexColor(line.textColor, "#ffffff")};`;
+    badge.textContent = line.name || "?";
+    return badge;
+}
+
+// Pictogramme TCL si on l'embarque, sinon (ou s'il ne charge pas) pastille colorée.
+function createLineIcon(line) {
+    if (!BUS_LINE_ICONS.includes(line.name)) return createLineBadge(line);
+
+    const icon = document.createElement("img");
+    icon.className = "orbit-bus-icon";
+    icon.src = chrome.runtime.getURL(`assets/${line.name}_bus.svg`);
+    icon.alt = `Ligne ${line.name}`;
+    icon.title = line.longName || "";
+    icon.style.cssText = "height:22px; width:auto; flex-shrink:0;";
+    icon.addEventListener("error", () => icon.replaceWith(createLineBadge(line)));
+    return icon;
+}
+
+function createLineCard(line, nowMs) {
+    const card = document.createElement("div");
+    card.className = "orbit-bus-line";
+    card.style.cssText = "display:flex; align-items:flex-start; gap:10px; padding:7px 0; border-bottom:1px solid #f1f1f1;";
+
+    const iconColumn = document.createElement("div");
+    iconColumn.style.cssText = "flex:0 0 66px; width:66px;";
+    iconColumn.appendChild(createLineIcon(line));
+
+    const directionsColumn = document.createElement("div");
+    directionsColumn.style.cssText = "flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:6px;";
+
+    let hasDepartures = false;
+    (Array.isArray(line.directions) ? line.directions : []).forEach((direction) => {
+        const result = createDirectionBlock(line, direction, nowMs);
+        hasDepartures = hasDepartures || result.hasDepartures;
+        directionsColumn.appendChild(result.block);
+    });
+
+    card.appendChild(iconColumn);
+    card.appendChild(directionsColumn);
+    return { card, hasDepartures };
+}
+
+// Fondu en bas de liste tant qu'il reste des départs à faire défiler.
+function updateScrollFade(content) {
+    const hasMore = content.scrollHeight - content.scrollTop - content.clientHeight > 4;
+    const mask = hasMore ? "linear-gradient(to bottom, #000 calc(100% - 24px), transparent)" : "none";
+    content.style.maskImage = mask;
+    content.style.webkitMaskImage = mask;
+}
+
+function renderBusDepartures(tclContainer) {
+    const content = tclContainer.querySelector(".overflowable-item");
+    if (!content) return;
+
+    if (!busState.data) {
+        if (busState.error) {
+            content.textContent = `Impossible de charger les départs (${busState.error.message}).`;
+            content.style.fontStyle = "italic";
+        }
+        return;
+    }
+
+    const nowMs = Date.now();
+    const scrollTop = content.scrollTop;
+    const fragment = document.createDocumentFragment();
+    let hasDepartures = false;
+
+    busState.data.lines.forEach((line) => {
+        const result = createLineCard(line, nowMs);
+        hasDepartures = hasDepartures || result.hasDepartures;
+        fragment.appendChild(result.card);
+    });
+
+    if (fragment.lastElementChild) fragment.lastElementChild.style.borderBottom = "none";
+
+    content.innerHTML = "";
+    content.style.fontStyle = "";
+    if (!hasDepartures) {
+        const empty = document.createElement("em");
+        empty.textContent = "Aucun départ à venir.";
+        content.appendChild(empty);
+        updateScrollFade(content);
+        return;
+    }
+    content.appendChild(fragment);
+    content.scrollTop = scrollTop;
+    updateScrollFade(content);
+}
+
+function renderBusStatus(tclContainer) {
+    const statusEl = tclContainer.querySelector(".orbit-bus-status");
+    if (!statusEl) return;
+
+    const parts = [];
+    if (busState.error) {
+        const retryAt = getBusNextAllowedAt();
+        const retryDay = getParisDayKey(retryAt) === getParisDayKey(Date.now()) ? "" : `${parisDayLabelFormat.format(retryAt)} `;
+        parts.push(`Mise à jour impossible (${busState.error.message}), nouvel essai ${retryDay}à ${formatParisTime(retryAt)}`);
+    } else if (busState.fetchedAt) {
+        parts.push(`Mis à jour à ${formatParisTime(busState.fetchedAt)}`);
+    }
+    if (busState.stale) parts.push("données potentiellement anciennes");
+
+    const text = parts.join(" · ");
+    statusEl.textContent = text.charAt(0).toUpperCase() + text.slice(1);
+    statusEl.style.color = busState.error ? "#9a3412" : "#9ca3af";
 }
 
 function createBusContainer(rowElem) {
@@ -570,134 +986,130 @@ function createBusContainer(rowElem) {
     tclContainer.className = "col-lg-4 col-md-6 col-xs-12 fixed-height";
     tclContainer.dataset.orbitBusContainer = "true";
     tclContainer.innerHTML = `
-        <div class="container-inner-item boxed agenda-container" style="border:0; border-radius:14px; box-shadow:0 10px 24px rgba(0,0,0,0.08); overflow:hidden;">
-            <div style="padding:12px 12px 8px 12px; background:linear-gradient(135deg,#f8fafc 0%,#eef6ff 100%); border-bottom:1px solid #e8edf5; display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                <h4 class="profile-title" style="margin:0; font-size:16px;">Prochains départs</h4>
-                <button class="orbit-alerts-btn" style="display:none; align-items:center; gap:5px; padding:4px 9px; border-radius:999px; border:1px solid; font-size:12px; font-weight:600; cursor:pointer; background:none; line-height:1; transition:opacity 140ms ease;">
+        <div class="container-inner-item boxed agenda-container" style="border:0; border-radius:14px; box-shadow:0 10px 24px rgba(0,0,0,0.08); overflow:hidden; display:flex; flex-direction:column; padding-bottom:12px;">
+            <h4 class="profile-title" style="justify-content:space-between; gap:8px; margin-bottom:10px;">
+                <span>Prochains départs</span>
+                <button class="orbit-alerts-btn" style="display:none; align-items:center; gap:5px; padding:4px 9px; border-radius:999px; border:1px solid; font-size:12px; font-weight:600; cursor:pointer; background:none; line-height:1; text-transform:none; transition:opacity 140ms ease;">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="flex-shrink:0;">
                         <path d="M12 3 1 21h22L12 3zm1 14h-2v-2h2v2zm0-4h-2V8h2v5z"/>
                     </svg>
                     <span class="orbit-alerts-count"></span>
                 </button>
-            </div>
-            <div class="orbit-alerts-panel" style="display:none; padding:8px 10px; border-bottom:1px solid #e8edf5; background:#fff; flex-direction:column; gap:6px;"></div>
-            <div class="overflowable-item loading" style="width:100%;font-size:13px;padding:10px 10px 6px 10px; background:#fff;">Chargement des départs...</div>
-            <div class="footer" style="text-align:right; padding:8px 10px 7px 0; border-top:1px solid #eee; margin-top:4px; background:#fff;">
-                <img src="${transitLogoUrl}" alt="Transit Logo" style="width:60px; opacity:0.7;">
+            </h4>
+            <div class="orbit-alerts-panel" style="display:none; flex:0 0 auto; max-height:150px; overflow:auto; margin:0 10px 8px 10px; flex-direction:column; gap:6px;"></div>
+            <div class="overflowable-item loading" style="flex:1 1 auto; min-height:0; max-height:none; margin-bottom:6px; padding:0 6px 0 10px; font-size:13px; overflow:auto;">Chargement des départs...</div>
+            <div class="footer" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 10px 0 10px; border-top:1px solid #f1f1f1;">
+                <span class="orbit-bus-status" style="font-size:10px; color:#9ca3af; min-width:0;"></span>
+                <img src="${transitLogoUrl}" alt="Transit Logo" style="width:54px; opacity:0.7; flex-shrink:0;">
             </div>
         </div>
     `;
+
+    const list = tclContainer.querySelector(".overflowable-item");
+    list.addEventListener("scroll", () => updateScrollFade(list));
 
     const btn = tclContainer.querySelector(".orbit-alerts-btn");
     const panel = tclContainer.querySelector(".orbit-alerts-panel");
     btn.addEventListener("click", () => {
         const open = panel.style.display !== "none";
         panel.style.display = open ? "none" : "flex";
+        updateScrollFade(list);
     });
+    panel.addEventListener("toggle", () => updateScrollFade(list), true);
 
     rowElem.firstElementChild.insertBefore(tclContainer, rowElem.firstElementChild.firstChild);
     return tclContainer;
 }
 
-async function displayBus() {
+function getBusContainer() {
     const rowElem = document.querySelector(".container-fullsize.full-width.fixed-height");
-    if (!rowElem || !rowElem.firstElementChild) return;
-
-    ensureStyle(BUS_STYLE_ID, BUS_CSS);
-
-    const existingContainer = rowElem.querySelector("[data-orbit-bus-container='true']");
-    const tclContainer = existingContainer || createBusContainer(rowElem);
-    const content = tclContainer.querySelector(".overflowable-item");
-    if (!content) return;
-
-    try {
-        const response = await fetch(buildBusApiUrl(), { headers: { Accept: "application/json" } });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const data = await response.json();
-        const routeDepartures = normalizeRouteDepartures(data);
-        const alertsByLine = extractAlertsByLine(routeDepartures, BUS_LINES);
-        const departures = collectDepartures(routeDepartures);
-
-        const alertsBtn = tclContainer.querySelector(".orbit-alerts-btn");
-        const alertsPanel = tclContainer.querySelector(".orbit-alerts-panel");
-        alertsPanel.innerHTML = "";
-        if (alertsByLine.length > 0) {
-            const totalAlerts = alertsByLine.reduce((sum, g) => sum + g.alerts.length, 0);
-            const theme = getSeverityTheme(alertsByLine[0].severity);
-            alertsBtn.style.cssText += `display:flex; color:${theme.color}; background:${theme.bg}; border-color:${theme.border};`;
-            alertsBtn.querySelector(".orbit-alerts-count").textContent = `${totalAlerts} alerte${totalAlerts > 1 ? "s" : ""}`;
-            alertsByLine.forEach((group) => alertsPanel.appendChild(createAlertAccordion(group)));
-        } else {
-            alertsBtn.style.display = "none";
-            alertsPanel.style.display = "none";
-        }
-
-        const fragment = document.createDocumentFragment();
-
-        if (departures.length === 0) {
-            const empty = document.createElement("em");
-            empty.textContent = "Aucun départ dans l'heure qui vient.";
-            fragment.appendChild(empty);
-            content.innerHTML = "";
-            content.appendChild(fragment);
-            return;
-        }
-
-        const now = new Date();
-        departures.slice(0, MAX_DEPARTURES).forEach((dep) => {
-            fragment.appendChild(createDepartureCard(dep, now));
-        });
-
-        content.innerHTML = "";
-        content.appendChild(fragment);
-
-        if (!tclContainer.dataset.orbitBusTimer) {
-            setInterval(() => updateDepartureTimes(content), BUS_UPDATE_MS);
-            setInterval(() => displayBus(), BUS_REFRESH_MS);
-            tclContainer.dataset.orbitBusTimer = "true";
-        }
-    } catch (err) {
-        console.error(err);
-        content.innerHTML = `<em>Impossible de charger les départs (${err.message}).</em>`;
-    }
+    if (!rowElem || !rowElem.firstElementChild) return null;
+    return rowElem.querySelector("[data-orbit-bus-container='true']") || createBusContainer(rowElem);
 }
 
-// ======================== UPDATE TIME DISPLAY ========================
-function updateTimeDisplay(span, diffMin, annule, animate = false) {
-    let text = "";
-    let color = "";
-
-    if (annule) {
-        text = "Annulé";
-        color = "red";
-    } else if (diffMin <= -5) {
-        text = "Parti ou en retard";
-        color = "gray";
-    } else if (diffMin <= 1) {
-        text = "à l'approche";
-        color = "orange";
-    } else if (diffMin <= 5) {
-        text = `Dans ${diffMin} min`;
-        color = "orange";
-    } else if (diffMin <= 10) {
-        text = `Dans ${diffMin} min`;
-        color = "DodgerBlue";
-    } else {
-        text = `Dans ${diffMin} min`;
-        color = "green";
+// ---------- Appels API ----------
+async function fetchTimetable() {
+    let response;
+    try {
+        response = await fetch(BUS_API_URL, { headers: { Accept: "application/json" } });
+    } catch {
+        throw new BusApiError(0, getBusErrorMessage(0));
+    }
+    if (!response.ok) {
+        throw new BusApiError(response.status, getBusErrorMessage(response.status), parseRetryAfterMs(response.headers.get("Retry-After")));
     }
 
-    span.textContent = text;
-    span.style.color = color;
-    span.style.textDecoration = annule ? "line-through" : "none";
+    const data = await response.json().catch(() => null);
+    if (!Array.isArray(data?.lines)) throw new BusApiError(response.status, "réponse invalide");
+    return { data, stale: response.headers.get("X-Cache") === "STALE" };
+}
 
-    if (animate) {
-        span.style.animation = "fadeUpdate 1s";
-        setTimeout(() => {
-            span.style.animation = "";
-        }, 1000);
+function scheduleBusRefresh() {
+    clearTimeout(busTimer);
+    const delay = Math.min(Math.max(getBusNextAllowedAt() - Date.now(), 1000), BUS_MAX_TIMEOUT_MS);
+    busTimer = setTimeout(refreshBus, delay);
+}
+
+async function refreshBus() {
+    clearTimeout(busTimer);
+    // L'onglet caché ne consomme pas de quota : visibilitychange relancera la boucle.
+    if (busInFlight || document.hidden) return;
+
+    busState = loadBusState() ?? busState;
+    if (Date.now() < getBusNextAllowedAt() || !getBusContainer()) {
+        scheduleBusRefresh();
+        return;
     }
+
+    busInFlight = true;
+    busState.lastAttemptAt = Date.now();
+    saveBusState();
+
+    let dataChanged = false;
+    try {
+        const { data, stale } = await fetchTimetable();
+        busState = { ...busState, data, stale, fetchedAt: Date.now(), blockedUntil: 0, error: null };
+        dataChanged = true;
+    } catch (err) {
+        const status = err instanceof BusApiError ? err.status : 0;
+        const message = err instanceof BusApiError ? err.message : getBusErrorMessage(0);
+        const defaultBackoff = status === 503 ? BUS_QUOTA_BACKOFF_MS : BUS_REFRESH_MS;
+        busState = { ...busState, error: { status, message }, blockedUntil: Date.now() + (err.retryAfterMs ?? defaultBackoff) };
+    } finally {
+        busInFlight = false;
+    }
+
+    saveBusState();
+    renderBus(dataChanged);
+    scheduleBusRefresh();
+}
+
+function renderBus(withAlerts = false) {
+    const tclContainer = getBusContainer();
+    if (!tclContainer) return;
+
+    ensureStyle(BUS_STYLE_ID, BUS_CSS);
+    if (withAlerts) renderBusAlerts(tclContainer);
+    renderBusDepartures(tclContainer);
+    renderBusStatus(tclContainer);
+}
+
+function displayBus() {
+    renderBus(true);
+
+    if (!busListenersReady) {
+        busListenersReady = true;
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden) return;
+            renderBus();
+            refreshBus();
+        });
+        setInterval(() => {
+            if (!document.hidden) renderBus();
+        }, BUS_UPDATE_MS);
+    }
+
+    refreshBus();
 }
 
 // ======================== MATRIX LINK ========================

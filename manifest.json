@@ -23,8 +23,10 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "assets/5_bus.svg",
         "assets/86_bus.svg",
+        "assets/105_bus.svg",
+        "assets/132_bus.svg",
+        "assets/216_bus.svg",
         "assets/transit.png"
       ],
       "matches": [
@@ -36,6 +38,6 @@
     "storage"
   ],
   "host_permissions": [
-    "https://transit.gchatain.fr/"
+    "https://transit.gchatain.fr/*"
   ]
 }
