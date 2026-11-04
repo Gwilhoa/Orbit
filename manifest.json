@@ -34,9 +34,6 @@
       ]
     }
   ],
-  "permissions": [
-    "storage"
-  ],
   "host_permissions": [
     "https://transit.gchatain.fr/*"
   ]

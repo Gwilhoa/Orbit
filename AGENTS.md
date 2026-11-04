@@ -15,7 +15,7 @@
 - **Imports**: ES6 modules, no external dependencies
 - **Async**: Use async/await, try/catch for error handling
 - **DOM**: Use document fragments, inline styles for dynamic elements
-- **Storage**: localStorage for persistence, chrome.storage for extension data
+- **Storage**: localStorage only for persistence; no `storage` permission (do not use chrome.storage without re-adding it to the manifest)
 - **Comments**: Section dividers with `===` banners, minimal inline comments
 
 ## ESLint Rules
